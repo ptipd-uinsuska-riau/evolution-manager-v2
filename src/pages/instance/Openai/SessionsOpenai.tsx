@@ -1,55 +1,20 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-
-import { useState, useEffect } from "react";
+import { ColumnDef, RowSelectionState, SortingState } from "@tanstack/react-table";
+import { Delete, ListCollapse, MessageSquare, MoreHorizontal, Pause, Play, RotateCcw, StopCircle } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "react-toastify";
-import {
-  Check,
-  ChevronDown,
-  Clock,
-  Delete,
-  Filter,
-  ListCollapse,
-  MessageSquare,
-  MoreHorizontal,
-  Pause,
-  Play,
-  RotateCcw,
-  StopCircle,
-  Trash2,
-  User,
-  X,
-} from "lucide-react";
 
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { Button } from "@evoapi/design-system/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@evoapi/design-system/card";
+import { Checkbox } from "@evoapi/design-system/checkbox";
+import { Label } from "@evoapi/design-system/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@evoapi/design-system/select";
+import { Textarea } from "@evoapi/design-system/textarea";
+import { DataTable } from "@/components/ui/data-table";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@evoapi/design-system/dropdown-menu";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Separator } from "@/components/ui/separator";
-import { Textarea } from "@/components/ui/textarea";
 
 import { useInstance } from "@/contexts/InstanceContext";
 
@@ -64,257 +29,261 @@ interface FilterState {
   number: string;
   status: string;
   time: string;
-  customTime?: {
-    condition: "more" | "less";
-    value: number;
-    unit: "minutes" | "hours" | "days";
-  };
+  customCondition: "more" | "less";
+  customValue: string;
+  customUnit: "minutes" | "hours" | "days";
+}
+
+const initialFilter: FilterState = {
+  name: "",
+  number: "",
+  status: "all",
+  time: "all",
+  customCondition: "more",
+  customValue: "",
+  customUnit: "minutes",
+};
+
+function customMinutes(value: string, unit: FilterState["customUnit"]) {
+  const v = parseInt(value);
+  if (!v || isNaN(v) || v <= 0) return null;
+  if (unit === "hours") return v * 60;
+  if (unit === "days") return v * 1440;
+  return v;
+}
+
+function matchesTime(updatedAt: string, filter: FilterState) {
+  if (filter.time === "all") return true;
+  const diffMin = (Date.now() - new Date(updatedAt).getTime()) / 60000;
+
+  if (filter.time === "custom") {
+    const m = customMinutes(filter.customValue, filter.customUnit);
+    if (m === null) return true;
+    return filter.customCondition === "more" ? diffMin > m : diffMin <= m;
+  }
+
+  if (filter.time.startsWith(">")) {
+    const m = parseInt(filter.time.slice(1));
+    return diffMin > m;
+  }
+  return diffMin <= parseInt(filter.time);
 }
 
 function SessionsOpenai({ openaiId }: { openaiId?: string }) {
   const { t } = useTranslation();
   const { instance } = useInstance();
-
-  const [open, setOpen] = useState(false);
-  const [filterState, setFilterState] = useState<FilterState>({
-    name: "",
-    number: "",
-    status: "all",
-    time: "all",
-  });
-  const [selectedSessions, setSelectedSessions] = useState<string[]>([]);
-  const [newStatus, setNewStatus] = useState("opened");
-  const [sessionsPerPage, setSessionsPerPage] = useState(9);
-  const [sessionsDisplayed, setSessionsDisplayed] = useState(0);
-  const [showBots, setShowBots] = useState(true);
-  const [filteredSessions, setFilteredSessions] = useState<IntegrationSession[]>([]);
-  const [sendMessageOpen, setSendMessageOpen] = useState(false);
-  const [selectedSessionForMessage, setSelectedSessionForMessage] = useState<string>("");
-  const [messageText, setMessageText] = useState("");
-
-  const { data: sessions = [], refetch: refetchSessions } = 
-    useFetchSessionsOpenai({
-      instanceName: instance?.name,
-      openaiId,
-      enabled: !!instance?.name && !!openaiId,
-    });
-
-  console.log("Hook result:", { 
-    sessions, 
-    instanceName: instance?.name, 
-    openaiId,
-    enabled: !!instance?.name && !!openaiId
-    });
-
   const { changeStatusOpenai } = useManageOpenai();
 
-  // Time filter functions
-  const parseTimeFilter = (
-    value: string,
-    customValue?: number,
-    customUnit?: string,
-    customCondition?: string
-  ) => {
-    if (value === "custom") {
-      if (!customValue || isNaN(customValue) || customValue <= 0) return null;
-      const minutes = convertCustomTime(customValue, customUnit || "minutes");
-      return { minutes, condition: customCondition };
-    }
+  const [open, setOpen] = useState(false);
+  const [sorting, setSorting] = useState<SortingState>([]);
+  const [rowSelection, setRowSelection] = useState<RowSelectionState>({});
+  const [filter, setFilter] = useState<FilterState>(initialFilter);
+  const [appliedFilter, setAppliedFilter] = useState<FilterState>(initialFilter);
+  const [perPage, setPerPage] = useState(9);
+  const [shown, setShown] = useState(9);
+  const [massStatus, setMassStatus] = useState("opened");
+  const [sendOpen, setSendOpen] = useState(false);
+  const [sendTarget, setSendTarget] = useState<string>("");
+  const [sendText, setSendText] = useState("");
+  const [sending, setSending] = useState(false);
 
-    if (!value || value === "all") return null;
+  const { data: sessions, refetch } = useFetchSessionsOpenai({
+    instanceName: instance?.name,
+    openaiId,
+    enabled: open,
+  });
 
-    if (value.startsWith(">")) {
-      const val = parseInt(value.slice(1));
-      return { moreThan: val };
-    } else {
-      return parseInt(value);
-    }
-  };
-
-  const convertCustomTime = (value: number, unit: string) => {
-    if (unit === "minutes") return value;
-    if (unit === "hours") return value * 60;
-    if (unit === "days") return value * 1440;
-    return null;
-  };
-
-  const checkTimeCondition = (diffMinutes: number, timeFilter: any) => {
-    if (typeof timeFilter === "object" && timeFilter.moreThan !== undefined) {
-      return diffMinutes > timeFilter.moreThan;
-    } else if (
-      typeof timeFilter === "object" &&
-      timeFilter.minutes !== undefined &&
-      timeFilter.condition
-    ) {
-      if (timeFilter.condition === "more") {
-        return diffMinutes > timeFilter.minutes;
-      } else {
-        return diffMinutes <= timeFilter.minutes;
-      }
-    } else if (typeof timeFilter === "number") {
-      return diffMinutes <= timeFilter;
-    }
-    return true;
-  };
-
-  // Apply filters
-  const applyFilters = () => {
-    const { name, number, status, time, customTime } = filterState;
-    const parsedTime = parseTimeFilter(
-      time,
-      customTime?.value,
-      customTime?.unit,
-      customTime?.condition
-    );
-
-    const filtered = sessions.filter((session) => {
-      const matchesName = session.pushName
-        ?.toLowerCase()
-        .includes(name.toLowerCase());
-      const matchesNumber = session.remoteJid.includes(number);
-      const matchesStatus = status === "all" || !status || session.status === status;
-
-      let matchesTime = true;
-      if (parsedTime !== null) {
-        const diffMinutes =
-          (Date.now() - new Date(session.updatedAt).getTime()) / 60000;
-        matchesTime = checkTimeCondition(diffMinutes, parsedTime);
-      }
-
-      return matchesName && matchesNumber && matchesStatus && matchesTime;
+  const filteredSessions = useMemo(() => {
+    const list = sessions ?? [];
+    const name = appliedFilter.name.trim().toLowerCase();
+    const number = appliedFilter.number.trim();
+    return list.filter((s) => {
+      if (name && !s.pushName?.toLowerCase().includes(name)) return false;
+      if (number && !s.remoteJid.includes(number)) return false;
+      if (appliedFilter.status !== "all" && s.status !== appliedFilter.status) return false;
+      if (!matchesTime(s.updatedAt, appliedFilter)) return false;
+      return true;
     });
+  }, [sessions, appliedFilter]);
 
-    setFilteredSessions(filtered);
-    // Reset pagination to show first batch of filtered sessions
-    setSessionsDisplayed(Math.min(sessionsPerPage, filtered.length));
+  const displayed = filteredSessions.slice(0, shown);
+  const selectedJids = useMemo(
+    () => Object.keys(rowSelection).filter((k) => rowSelection[k]).map((idx) => displayed[Number(idx)]?.remoteJid).filter(Boolean) as string[],
+    [rowSelection, displayed],
+  );
+
+  useEffect(() => {
+    setShown(perPage);
+    setRowSelection({});
+  }, [appliedFilter, perPage]);
+
+  const onReset = () => {
+    refetch();
   };
 
-  // Mass actions
-  const handleSelectAll = (checked: boolean) => {
-    if (checked) {
-      // Select all displayed sessions (filtered)
-      setSelectedSessions(displayedSessions.map((s) => s.remoteJid));
-    } else {
-      setSelectedSessions([]);
-    }
+  const applyFilters = () => {
+    setAppliedFilter(filter);
   };
 
-  const handleMassStatusChange = async () => {
-    if (selectedSessions.length === 0) {
-      toast.error("Select at least one session.");
-      return;
-    }
-
-    try {
-      await Promise.all(
-        selectedSessions.map((remoteJid) =>
-          changeStatusOpenai({
-            instanceName: instance?.name || "",
-            token: instance?.token || "",
-            remoteJid,
-            status: newStatus,
-          })
-        )
-      );
-
-      toast.success("Status updated for selected sessions.");
-      setSelectedSessions([]);
-      refetchSessions();
-    } catch (error: any) {
-      console.error(error);
-      toast.error(`Error: ${error?.response?.data?.response?.message}`);
-    }
+  const clearFilters = () => {
+    setFilter(initialFilter);
+    setAppliedFilter(initialFilter);
   };
 
-  // Individual actions
   const changeStatus = async (remoteJid: string, status: string) => {
     try {
       if (!instance) return;
-
-      await changeStatusOpenai({
-        instanceName: instance.name,
-        token: instance.token,
-        remoteJid,
-        status,
-      });
-
-      toast.success("Status changed successfully.");
-      refetchSessions();
+      await changeStatusOpenai({ instanceName: instance.name, token: instance.token, remoteJid, status });
+      toast.success(t("openai.toast.success.status"));
+      onReset();
     } catch (error: any) {
       console.error("Error:", error);
-      toast.error(`Error: ${error?.response?.data?.response?.message}`);
+      toast.error(`Error : ${error?.response?.data?.response?.message}`);
     }
   };
 
-  const openSendMessageModal = (remoteJid: string) => {
-    setSelectedSessionForMessage(remoteJid);
-    setMessageText("");
-    setSendMessageOpen(true);
+  const applyMass = async () => {
+    if (selectedJids.length === 0) {
+      toast.error(t("sessions.mass.noneSelected"));
+      return;
+    }
+    try {
+      if (!instance) return;
+      await Promise.all(
+        selectedJids.map((remoteJid) =>
+          changeStatusOpenai({ instanceName: instance.name, token: instance.token, remoteJid, status: massStatus }),
+        ),
+      );
+      toast.success(t("sessions.mass.success"));
+      setRowSelection({});
+      onReset();
+    } catch (error: any) {
+      console.error(error);
+      toast.error(error?.response?.data?.response?.message ?? t("sessions.mass.error"));
+    }
+  };
+
+  const openSend = (remoteJid: string) => {
+    setSendTarget(remoteJid);
+    setSendText("");
+    setSendOpen(true);
   };
 
   const sendMessage = async () => {
-    if (!messageText.trim()) {
-      toast.error("Please enter a message.");
+    if (!sendText.trim()) {
+      toast.error(t("sessions.send.empty"));
       return;
     }
-
     try {
       if (!instance) return;
-
-      await api.post(`/message/sendText/${instance.name}`, {
-        number: selectedSessionForMessage,
-        text: messageText
-      }, {
-        headers: {
-          apikey: instance.token
-        }
-      });
-
-      toast.success("Message sent successfully.");
-      setSendMessageOpen(false);
-      setMessageText("");
-      setSelectedSessionForMessage("");
+      setSending(true);
+      await api.post(
+        `/message/sendText/${instance.name}`,
+        { number: sendTarget, text: sendText },
+        { headers: { apikey: instance.token } },
+      );
+      toast.success(t("sessions.send.success"));
+      setSendOpen(false);
+      setSendText("");
+      setSendTarget("");
     } catch (error: any) {
       console.error("Error:", error);
-      toast.error(`Error: ${error?.response?.data?.response?.message || error?.message || 'Failed to send message'}`);
+      toast.error(error?.response?.data?.response?.message ?? error?.message ?? t("sessions.send.error"));
+    } finally {
+      setSending(false);
     }
   };
 
+  const columns: ColumnDef<IntegrationSession>[] = [
+    {
+      id: "select",
+      header: ({ table }) => (
+        <Checkbox
+          checked={table.getIsAllPageRowsSelected() || (table.getIsSomePageRowsSelected() && "indeterminate")}
+          onCheckedChange={(value) => table.toggleAllPageRowsSelected(!!value)}
+          aria-label={t("sessions.mass.selectAll")}
+        />
+      ),
+      cell: ({ row }) => (
+        <Checkbox
+          checked={row.getIsSelected()}
+          onCheckedChange={(value) => row.toggleSelected(!!value)}
+          aria-label={t("sessions.mass.selectAll")}
+        />
+      ),
+      enableSorting: false,
+    },
+    {
+      accessorKey: "remoteJid",
+      header: () => <div className="text-center">{t("openai.sessions.table.remoteJid")}</div>,
+      cell: ({ row }) => <div>{row.getValue("remoteJid")}</div>,
+    },
+    {
+      accessorKey: "pushName",
+      header: () => <div className="text-center">{t("openai.sessions.table.pushName")}</div>,
+      cell: ({ row }) => <div>{row.getValue("pushName")}</div>,
+    },
+    {
+      accessorKey: "sessionId",
+      header: () => <div className="text-center">{t("openai.sessions.table.sessionId")}</div>,
+      cell: ({ row }) => <div>{row.getValue("sessionId")}</div>,
+    },
+    {
+      accessorKey: "status",
+      header: () => <div className="text-center">{t("openai.sessions.table.status")}</div>,
+      cell: ({ row }) => <div>{row.getValue("status")}</div>,
+    },
+    {
+      id: "actions",
+      enableHiding: false,
+      cell: ({ row }) => {
+        const session = row.original;
+        return (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon">
+                <span className="sr-only">{t("openai.sessions.table.actions.title")}</span>
+                <MoreHorizontal className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuLabel>{t("openai.sessions.table.actions.title")}</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              {session.status !== "opened" && (
+                <DropdownMenuItem onClick={() => changeStatus(session.remoteJid, "opened")}>
+                  <Play className="mr-2 h-4 w-4" />
+                  {t("openai.sessions.table.actions.open")}
+                </DropdownMenuItem>
+              )}
+              {session.status !== "paused" && session.status !== "closed" && (
+                <DropdownMenuItem onClick={() => changeStatus(session.remoteJid, "paused")}>
+                  <Pause className="mr-2 h-4 w-4" />
+                  {t("openai.sessions.table.actions.pause")}
+                </DropdownMenuItem>
+              )}
+              {session.status !== "closed" && (
+                <DropdownMenuItem onClick={() => changeStatus(session.remoteJid, "closed")}>
+                  <StopCircle className="mr-2 h-4 w-4" />
+                  {t("openai.sessions.table.actions.close")}
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuItem onClick={() => openSend(session.remoteJid)}>
+                <MessageSquare className="mr-2 h-4 w-4" />
+                {t("sessions.actions.sendMessage")}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => changeStatus(session.remoteJid, "delete")}>
+                <Delete className="mr-2 h-4 w-4" />
+                {t("openai.sessions.table.actions.delete")}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        );
+      },
+    },
+  ];
 
-
-  // Pagination
-  const showMore = () => {
-    setSessionsDisplayed((prev) => Math.min(prev + sessionsPerPage, filteredSessions.length));
-  };
-
-  const showAll = () => {
-    setSessionsDisplayed(filteredSessions.length);
-  };
-
-  const showLess = () => {
-    setSessionsDisplayed(Math.min(sessionsPerPage, filteredSessions.length));
-  };
-
-  // Initialize filtered sessions when sessions change
-  useEffect(() => {
-    console.log("Sessions changed:", sessions);
-    if (sessions.length > 0) {
-      setFilteredSessions(sessions);
-      // Show first batch of sessions automatically
-      setSessionsDisplayed(Math.min(sessionsPerPage, sessions.length));
-      console.log("Filtered sessions set:", sessions.length);
-    }
-  }, [sessions, sessionsPerPage]);
-
-  const displayedSessions = filteredSessions.slice(0, sessionsDisplayed);
-  
-  console.log("Debug info:", {
-    sessionsCount: sessions.length,
-    filteredCount: filteredSessions.length,
-    displayedCount: displayedSessions.length,
-    sessionsDisplayed,
-    sessionsPerPage
-  });
+  const timePresets: string[] = ["all", "5", "10", "15", "20", "30", "60", ">60", ">120", ">300", ">1440", "custom"];
+  const statusPresets: string[] = ["all", "opened", "paused", "closed"];
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -324,421 +293,230 @@ function SessionsOpenai({ openaiId }: { openaiId?: string }) {
           <span className="hidden md:inline">{t("openai.sessions.label")}</span>
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-w-7xl h-[85vh] flex flex-col">
+      <DialogContent className="max-w-7xl h-[85vh] flex flex-col overflow-hidden">
         <DialogHeader>
-          <DialogTitle>OpenAI Sessions</DialogTitle>
+          <DialogTitle>{t("openai.sessions.label")}</DialogTitle>
         </DialogHeader>
 
-        <ScrollArea className="flex-1 pr-6">
-          <div className="space-y-6">
-            {/* Debug Info */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Debug Info</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-2 text-sm">
-                  <p>Instance: {instance?.name || "None"}</p>
-                  <p>OpenAI ID: {openaiId || "None"}</p>
-                  <p>Sessions Count: {sessions.length}</p>
-                  <p>Filtered Count: {filteredSessions.length}</p>
-                  <p>Displayed Count: {displayedSessions.length}</p>
-                  <Button onClick={() => refetchSessions()} size="sm">
-                    Refetch Sessions
-                  </Button>
+        <div className="flex-1 space-y-4 overflow-y-auto pr-2">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">{t("sessions.filters.title")}</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
+                <div className="space-y-2">
+                  <Label>{t("sessions.filters.name")}</Label>
+                  <Input
+                    placeholder={t("sessions.filters.namePlaceholder")}
+                    value={filter.name}
+                    onChange={(e) => setFilter((p) => ({ ...p, name: e.target.value }))}
+                  />
                 </div>
-              </CardContent>
-            </Card>
-
-            {/* Toggle Bots Button */}
-            <Button
-              variant="outline"
-              onClick={() => setShowBots(!showBots)}
-              className="w-full"
-            >
-              {showBots ? "Hide Available Bots" : "Show Available Bots"}
-            </Button>
-
-            {/* Advanced Filters */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Filter className="h-5 w-5" />
-                  Advanced Filters
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                  <div>
-                    <Label>Name Filter</Label>
-                    <Input
-                      placeholder="Filter by name"
-                      value={filterState.name}
-                      onChange={(e) =>
-                        setFilterState((prev) => ({ ...prev, name: e.target.value }))
-                      }
-                    />
-                  </div>
-                  <div>
-                    <Label>Number Filter</Label>
-                    <Input
-                      placeholder="Filter by number"
-                      value={filterState.number}
-                      onChange={(e) =>
-                        setFilterState((prev) => ({ ...prev, number: e.target.value }))
-                      }
-                    />
-                  </div>
-                  <div>
-                    <Label>Status Filter</Label>
-                    <Select
-                      value={filterState.status}
-                      onValueChange={(value) =>
-                        setFilterState((prev) => ({ ...prev, status: value }))
-                      }
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Filter by status" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">All Status</SelectItem>
-                        <SelectItem value="opened">Opened</SelectItem>
-                        <SelectItem value="paused">Paused</SelectItem>
-                        <SelectItem value="closed">Closed</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div>
-                    <Label>Time Filter</Label>
-                    <Select
-                      value={filterState.time}
-                      onValueChange={(value) =>
-                        setFilterState((prev) => ({ ...prev, time: value }))
-                      }
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Filter by time" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">All Times</SelectItem>
-                        <SelectItem value="5">Last 5 Minutes</SelectItem>
-                        <SelectItem value="10">Last 10 Minutes</SelectItem>
-                        <SelectItem value="15">Last 15 Minutes</SelectItem>
-                        <SelectItem value="20">Last 20 Minutes</SelectItem>
-                        <SelectItem value="30">Last 30 Minutes</SelectItem>
-                        <SelectItem value="60">Last 60 Minutes</SelectItem>
-                        <SelectItem value=">60">More than 60 Minutes</SelectItem>
-                        <SelectItem value=">120">More than 2 Hours</SelectItem>
-                        <SelectItem value=">300">More than 5 Hours</SelectItem>
-                        <SelectItem value=">1440">More than 24 Hours</SelectItem>
-                        <SelectItem value="custom">Custom</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-          </div>
-
-                {/* Custom Time Filter */}
-                {filterState.time === "custom" && (
-                  <div className="flex gap-2 mt-4">
-                    <Select
-                      value={filterState.customTime?.condition || "more"}
-                      onValueChange={(value: "more" | "less") =>
-                        setFilterState((prev) => ({
-                          ...prev,
-                          customTime: {
-                            condition: value,
-                            value: prev.customTime?.value || 0,
-                            unit: prev.customTime?.unit || "minutes",
-                          },
-                        }))
-                      }
-                    >
-                      <SelectTrigger className="w-32">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="more">More than</SelectItem>
-                        <SelectItem value="less">Less than</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <Input
-                      type="number"
-                      placeholder="Value"
-                      className="w-20"
-                      value={filterState.customTime?.value || ""}
-                      onChange={(e) =>
-                        setFilterState((prev) => ({
-                          ...prev,
-                          customTime: {
-                            condition: prev.customTime?.condition || "more",
-                            value: parseInt(e.target.value) || 0,
-                            unit: prev.customTime?.unit || "minutes",
-                          },
-                        }))
-                      }
-                    />
-                    <Select
-                      value={filterState.customTime?.unit || "minutes"}
-                      onValueChange={(value: "minutes" | "hours" | "days") =>
-                        setFilterState((prev) => ({
-                          ...prev,
-                          customTime: {
-                            condition: prev.customTime?.condition || "more",
-                            value: prev.customTime?.value || 0,
-                            unit: value,
-                          },
-                        }))
-                      }
-                    >
-                      <SelectTrigger className="w-24">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="minutes">Minutes</SelectItem>
-                        <SelectItem value="hours">Hours</SelectItem>
-                        <SelectItem value="days">Days</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                )}
-
-                <Button onClick={applyFilters} className="mt-4">
-                  Apply Filters
-                </Button>
-              </CardContent>
-            </Card>
-
-            {/* Mass Actions */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Mass Actions</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="flex items-center gap-4">
-                  <div className="flex items-center space-x-2">
-                    <input
-                      type="checkbox"
-                      checked={
-                        displayedSessions.length > 0 &&
-                        displayedSessions.every((session) =>
-                          selectedSessions.includes(session.remoteJid)
-                        )
-                      }
-                      onChange={(e) => handleSelectAll(e.target.checked)}
-                      className="h-4 w-4"
-                    />
-                    <Label>Select All</Label>
-                  </div>
-                  <Select value={newStatus} onValueChange={setNewStatus}>
-                    <SelectTrigger className="w-32">
+                <div className="space-y-2">
+                  <Label>{t("sessions.filters.number")}</Label>
+                  <Input
+                    placeholder={t("sessions.filters.numberPlaceholder")}
+                    value={filter.number}
+                    onChange={(e) => setFilter((p) => ({ ...p, number: e.target.value }))}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>{t("sessions.filters.status")}</Label>
+                  <Select value={filter.status} onValueChange={(v) => setFilter((p) => ({ ...p, status: v }))}>
+                    <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="opened">Opened</SelectItem>
-                      <SelectItem value="paused">Paused</SelectItem>
-                      <SelectItem value="delete">Delete</SelectItem>
-                      <SelectItem value="closed">Closed</SelectItem>
+                      {statusPresets.map((s) => (
+                        <SelectItem key={s} value={s}>
+                          {t(`sessions.filters.statusOptions.${s}`)}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
-                  <Button onClick={handleMassStatusChange}>
-                    Change Status of Selected ({selectedSessions.length})
-                  </Button>
                 </div>
-              </CardContent>
-            </Card>
+                <div className="space-y-2">
+                  <Label>{t("sessions.filters.time")}</Label>
+                  <Select value={filter.time} onValueChange={(v) => setFilter((p) => ({ ...p, time: v }))}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {timePresets.map((s) => (
+                        <SelectItem key={s} value={s}>
+                          {t(`sessions.filters.timeOptions.${s}`)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
 
-            {/* Sessions Display */}
+              {filter.time === "custom" && (
+                <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
+                  <Select
+                    value={filter.customCondition}
+                    onValueChange={(v: "more" | "less") => setFilter((p) => ({ ...p, customCondition: v }))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="more">{t("sessions.filters.custom.more")}</SelectItem>
+                      <SelectItem value="less">{t("sessions.filters.custom.less")}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Input
+                    type="number"
+                    min={1}
+                    placeholder={t("sessions.filters.custom.valuePlaceholder")}
+                    value={filter.customValue}
+                    onChange={(e) => setFilter((p) => ({ ...p, customValue: e.target.value }))}
+                  />
+                  <Select
+                    value={filter.customUnit}
+                    onValueChange={(v: FilterState["customUnit"]) => setFilter((p) => ({ ...p, customUnit: v }))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="minutes">{t("sessions.filters.custom.minutes")}</SelectItem>
+                      <SelectItem value="hours">{t("sessions.filters.custom.hours")}</SelectItem>
+                      <SelectItem value="days">{t("sessions.filters.custom.days")}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+
+              <div className="flex flex-wrap gap-2">
+                <Button onClick={applyFilters} size="sm">
+                  {t("sessions.filters.apply")}
+                </Button>
+                <Button onClick={clearFilters} size="sm" variant="outline">
+                  {t("sessions.filters.clear")}
+                </Button>
+                <Button onClick={onReset} size="sm" variant="outline">
+                  <RotateCcw size={14} className="mr-1" />
+                  {t("button.refresh")}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          {selectedJids.length > 0 && (
             <Card>
               <CardHeader>
-                <CardTitle>
-                  Sessions ({filteredSessions.length} total)
-                </CardTitle>
+                <CardTitle className="text-base">{t("sessions.mass.title")}</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {displayedSessions.length === 0 ? (
-                    <div className="col-span-full text-center py-8 text-muted-foreground">
-                      {sessions.length === 0 ? (
-                        <div>
-                          <p>No sessions found.</p>
-                          <p className="text-sm">Instance: {instance?.name || "None"}</p>
-                          <p className="text-sm">OpenAI ID: {openaiId || "None"}</p>
-                        </div>
-                      ) : (
-                        <p>No sessions match the current filters.</p>
-                      )}
-          </div>
-                  ) : (
-                    displayedSessions.map((session) => (
-                      <Card key={session.remoteJid} className="relative">
-                        <CardContent className="p-4">
-                          <div className="absolute top-4 right-4">
-                            <input
-                              type="checkbox"
-                              checked={selectedSessions.includes(session.remoteJid)}
-                              onChange={(e) => {
-                                if (e.target.checked) {
-                                  setSelectedSessions((prev) => [
-                                    ...prev,
-                                    session.remoteJid,
-                                  ]);
-                                } else {
-                                  setSelectedSessions((prev) =>
-                                    prev.filter((id) => id !== session.remoteJid)
-                                  );
-                                }
-                              }}
-                              className="h-4 w-4"
-                            />
-          </div>
-
-                          <div className="space-y-2">
-                            <h3 className="font-semibold">
-                              {session.pushName || "No Name"}
-                            </h3>
-                            <p className="text-sm text-muted-foreground">
-                              <strong>Number:</strong> {session.remoteJid}
-                            </p>
-                            <p className="text-sm text-muted-foreground">
-                              <strong>Status:</strong> {session.status}
-                            </p>
-                            <p className="text-sm text-muted-foreground">
-                              <strong>Updated:</strong>{" "}
-                              {new Date(session.updatedAt).toLocaleString()}
-                            </p>
-          </div>
-
-                          <div className="absolute bottom-4 right-4">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" size="sm">
-                  <MoreHorizontal className="h-4 w-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                                <DropdownMenuLabel>Actions</DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                {session.status !== "opened" && (
-                  <DropdownMenuItem
-                                    onClick={() =>
-                                      changeStatus(session.remoteJid, "opened")
-                                    }
-                  >
-                    <Play className="mr-2 h-4 w-4" />
-                                    Open
-                  </DropdownMenuItem>
-                )}
-                                {session.status !== "paused" &&
-                                  session.status !== "closed" && (
-                  <DropdownMenuItem
-                                      onClick={() =>
-                                        changeStatus(session.remoteJid, "paused")
-                                      }
-                  >
-                    <Pause className="mr-2 h-4 w-4" />
-                                      Pause
-                  </DropdownMenuItem>
-                )}
-                {session.status !== "closed" && (
-                  <DropdownMenuItem
-                                    onClick={() =>
-                                      changeStatus(session.remoteJid, "closed")
-                                    }
-                  >
-                    <StopCircle className="mr-2 h-4 w-4" />
-                                    Close
-                  </DropdownMenuItem>
-                )}
-                <DropdownMenuItem
-                                  onClick={() =>
-                                    changeStatus(session.remoteJid, "delete")
-                                  }
-                >
-                  <Delete className="mr-2 h-4 w-4" />
-                                  Delete
-                                </DropdownMenuItem>
-                                <DropdownMenuSeparator />
-                                <DropdownMenuItem
-                                  onClick={() =>
-                                    openSendMessageModal(session.remoteJid)
-                                  }
-                                >
-                                  <MessageSquare className="mr-2 h-4 w-4" />
-                                  Send Message
-                                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    ))
-                  )}
-                </div>
-
-                {/* Pagination */}
-                <div className="flex justify-center gap-4 mt-6">
-                  <Button
-                    variant="outline"
-                    onClick={showMore}
-                    disabled={sessionsDisplayed >= filteredSessions.length}
-                  >
-                    Show More
+                <div className="flex flex-wrap items-end gap-3">
+                  <div className="text-sm text-muted-foreground">
+                    {t("sessions.mass.selected", { count: selectedJids.length })}
+                  </div>
+                  <div className="flex-1 min-w-[180px] space-y-1">
+                    <Label>{t("sessions.mass.newStatus")}</Label>
+                    <Select value={massStatus} onValueChange={setMassStatus}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="opened">{t("openai.sessions.table.actions.open")}</SelectItem>
+                        <SelectItem value="paused">{t("openai.sessions.table.actions.pause")}</SelectItem>
+                        <SelectItem value="closed">{t("openai.sessions.table.actions.close")}</SelectItem>
+                        <SelectItem value="delete">{t("openai.sessions.table.actions.delete")}</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <Button onClick={applyMass} size="sm">
+                    {t("sessions.mass.apply")}
                   </Button>
-                  <Button
-                    variant="outline"
-                    onClick={showAll}
-                    disabled={sessionsDisplayed >= filteredSessions.length}
-                  >
-                    Show All
-          </Button>
-                  <Button
-                    variant="outline"
-                    onClick={showLess}
-                    disabled={sessionsDisplayed <= sessionsPerPage}
-                  >
-                    Show Less
-              </Button>
-            </div>
+                </div>
               </CardContent>
             </Card>
-          </div>
-        </ScrollArea>
-      </DialogContent>
+          )}
 
-      {/* Send Message Modal */}
-      <Dialog open={sendMessageOpen} onOpenChange={setSendMessageOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Send Message</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div>
-              <Label>To: {selectedSessionForMessage}</Label>
-            </div>
-            <div>
-              <Label htmlFor="message">Message</Label>
-              <Textarea
-                id="message"
-                placeholder="Type your message here..."
-                value={messageText}
-                onChange={(e) => setMessageText(e.target.value)}
-                rows={4}
-              />
-            </div>
-            <div className="flex justify-end space-x-2">
-              <Button
-                variant="outline"
-                onClick={() => setSendMessageOpen(false)}
-              >
-                Cancel
-              </Button>
-              <Button onClick={sendMessage} disabled={!messageText.trim()}>
-                Send Message
-              </Button>
+          <DataTable
+            columns={columns}
+            data={displayed}
+            onSortingChange={setSorting}
+            state={{ sorting, rowSelection }}
+            onRowSelectionChange={setRowSelection}
+            enableRowSelection
+            getRowId={(_, idx) => String(idx)}
+            noResultsMessage={t("sessions.empty")}
+          />
+
+          <div className="flex flex-wrap items-center justify-between gap-3 px-1 text-sm text-muted-foreground">
+            <span>
+              {t("sessions.pagination.showing", { shown: displayed.length, total: filteredSessions.length })}
+            </span>
+            <div className="flex flex-wrap items-center gap-2">
+              <Label htmlFor="per-page" className="text-xs">
+                {t("sessions.pagination.perPage")}
+              </Label>
+              <Select value={String(perPage)} onValueChange={(v) => setPerPage(parseInt(v))}>
+                <SelectTrigger id="per-page" className="h-8 w-20">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="9">9</SelectItem>
+                  <SelectItem value="25">25</SelectItem>
+                  <SelectItem value="50">50</SelectItem>
+                  <SelectItem value="100">100</SelectItem>
+                </SelectContent>
+              </Select>
+              {shown < filteredSessions.length && (
+                <Button size="sm" variant="outline" onClick={() => setShown((s) => Math.min(s + perPage, filteredSessions.length))}>
+                  {t("sessions.pagination.showMore")}
+                </Button>
+              )}
+              {shown < filteredSessions.length && (
+                <Button size="sm" variant="outline" onClick={() => setShown(filteredSessions.length)}>
+                  {t("sessions.pagination.showAll")}
+                </Button>
+              )}
+              {shown > perPage && (
+                <Button size="sm" variant="outline" onClick={() => setShown(perPage)}>
+                  {t("sessions.pagination.showLess")}
+                </Button>
+              )}
             </div>
           </div>
-        </DialogContent>
-      </Dialog>
+        </div>
+
+        <Dialog open={sendOpen} onOpenChange={(o) => !sending && setSendOpen(o)}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>{t("sessions.send.title")}</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-3">
+              <div className="space-y-1">
+                <Label>{t("sessions.send.to")}</Label>
+                <Input value={sendTarget} disabled />
+              </div>
+              <div className="space-y-1">
+                <Label>{t("sessions.send.messagePlaceholder")}</Label>
+                <Textarea
+                  rows={4}
+                  placeholder={t("sessions.send.messagePlaceholder")}
+                  value={sendText}
+                  onChange={(e) => setSendText(e.target.value)}
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setSendOpen(false)} disabled={sending}>
+                {t("button.cancel")}
+              </Button>
+              <Button onClick={sendMessage} disabled={sending}>
+                {sending ? t("sessions.send.sending") : t("sessions.send.send")}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </DialogContent>
     </Dialog>
   );
 }
