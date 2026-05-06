@@ -22,6 +22,29 @@
     "markAll": "Marcar Todos",
     "unMarkAll": "Desmarcar Todos"
   },
+  "testInteractive": {
+    "title": "Testar mensagens interativas",
+    "subtitle": "Instância: {{instance}} ·",
+    "number": "Número de destino",
+    "numberHint": "Com DDI/DDD, somente dígitos (ex.: 5511999999999)",
+    "payload": "Payload JSON (editável)",
+    "send": "Enviar",
+    "sending": "Enviando...",
+    "requiresOpen": "Disponível apenas com a instância conectada",
+    "tabs": {
+      "reply": "Reply",
+      "cta": "CTA",
+      "pix": "PIX",
+      "list": "Lista",
+      "carousel": "Carrossel"
+    },
+    "success": "Mensagem enviada (id {{id}})",
+    "errors": {
+      "missingNumber": "Informe o número de destino",
+      "invalidJson": "JSON inválido: {{message}}",
+      "unknown": "Falha ao enviar a mensagem"
+    }
+  },
   "sessions": {
     "filters": {
       "title": "Filtros avançados",

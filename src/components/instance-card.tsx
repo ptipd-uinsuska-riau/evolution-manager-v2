@@ -1,9 +1,12 @@
 import { Badge } from "@evoapi/design-system/badge";
 import { Button } from "@evoapi/design-system/button";
 import { Card, CardContent } from "@evoapi/design-system/card";
-import { Settings, Trash2 } from "lucide-react";
+import { FlaskConical, Settings, Trash2 } from "lucide-react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
+
+import { TestInteractiveModal } from "@/components/test-interactive-modal";
 
 import { Instance } from "@/types/evolution.types";
 
@@ -23,9 +26,11 @@ interface InstanceCardProps {
 export function InstanceCard({ instance, isDeleting, onDelete }: InstanceCardProps) {
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
+  const [testOpen, setTestOpen] = useState(false);
   const numberFormatter = new Intl.NumberFormat(i18n.language);
   const displayName = instance.profileName || instance.name;
   const goToInstance = () => navigate(`/manager/instance/${instance.id}/dashboard`);
+  const canTest = instance.connectionStatus === "open";
 
   return (
     <Card className="group relative overflow-hidden border-sidebar-border bg-sidebar transition-all duration-300 hover:bg-sidebar-accent/30 hover:shadow-lg hover:shadow-black/10">
@@ -93,6 +98,16 @@ export function InstanceCard({ instance, isDeleting, onDelete }: InstanceCardPro
           <div className="w-px bg-sidebar-border" />
           <Button
             variant="ghost"
+            className="h-12 rounded-none px-4 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-40"
+            disabled={!canTest}
+            title={canTest ? t("testInteractive.title") : t("testInteractive.requiresOpen")}
+            onClick={() => setTestOpen(true)}
+          >
+            <FlaskConical className="h-4 w-4" />
+          </Button>
+          <div className="w-px bg-sidebar-border" />
+          <Button
+            variant="ghost"
             className="h-12 rounded-none px-4 text-red-500 hover:bg-red-500/10 hover:text-red-400"
             disabled={isDeleting}
             onClick={() => onDelete(instance)}
@@ -101,6 +116,8 @@ export function InstanceCard({ instance, isDeleting, onDelete }: InstanceCardPro
           </Button>
         </div>
       </CardContent>
+
+      <TestInteractiveModal instance={instance} open={testOpen} onOpenChange={setTestOpen} />
     </Card>
   );
 }

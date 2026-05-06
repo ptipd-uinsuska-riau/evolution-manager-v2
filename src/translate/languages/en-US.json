@@ -22,6 +22,29 @@
     "unMarkAll": "Unmark All",
     "refresh": "Refresh"
   },
+  "testInteractive": {
+    "title": "Test interactive messages",
+    "subtitle": "Instance: {{instance}} ·",
+    "number": "Recipient number",
+    "numberHint": "With country/area code, digits only (e.g. 5511999999999)",
+    "payload": "JSON payload (editable)",
+    "send": "Send",
+    "sending": "Sending...",
+    "requiresOpen": "Available only when the instance is connected",
+    "tabs": {
+      "reply": "Reply",
+      "cta": "CTA",
+      "pix": "PIX",
+      "list": "List",
+      "carousel": "Carousel"
+    },
+    "success": "Message sent (id {{id}})",
+    "errors": {
+      "missingNumber": "Provide the recipient number",
+      "invalidJson": "Invalid JSON: {{message}}",
+      "unknown": "Failed to send the message"
+    }
+  },
   "sessions": {
     "filters": {
       "title": "Advanced filters",

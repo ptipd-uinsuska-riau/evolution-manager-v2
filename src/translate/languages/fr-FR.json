@@ -22,6 +22,29 @@
     "unMarkAll": "Démarquer Tous",
     "refresh": "Actualiser"
   },
+  "testInteractive": {
+    "title": "Tester les messages interactifs",
+    "subtitle": "Instance : {{instance}} ·",
+    "number": "Numéro de destination",
+    "numberHint": "Avec indicatif pays/zone, chiffres uniquement (ex. : 5511999999999)",
+    "payload": "Payload JSON (modifiable)",
+    "send": "Envoyer",
+    "sending": "Envoi...",
+    "requiresOpen": "Disponible uniquement lorsque l'instance est connectée",
+    "tabs": {
+      "reply": "Reply",
+      "cta": "CTA",
+      "pix": "PIX",
+      "list": "Liste",
+      "carousel": "Carrousel"
+    },
+    "success": "Message envoyé (id {{id}})",
+    "errors": {
+      "missingNumber": "Indiquez le numéro de destination",
+      "invalidJson": "JSON invalide : {{message}}",
+      "unknown": "Échec de l'envoi du message"
+    }
+  },
   "sessions": {
     "filters": {
       "title": "Filtres avancés",
