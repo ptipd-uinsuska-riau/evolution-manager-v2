@@ -1,8 +1,14 @@
 import { Button } from "@evoapi/design-system/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from "@evoapi/design-system/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@evoapi/design-system/skeleton";
-import { Layers, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { ChevronsUpDown, Layers, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "react-toastify";
@@ -25,6 +31,7 @@ function Dashboard() {
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
   const [deletingName, setDeletingName] = useState<string | null>(null);
   const [nameSearch, setNameSearch] = useState("");
+  const [searchStatus, setSearchStatus] = useState("all");
 
   const { deleteInstance, logout } = useManageInstance();
   const { data: instances, isLoading, refetch } = useFetchInstances();
@@ -63,11 +70,21 @@ function Dashboard() {
   };
 
   const filteredInstances = useMemo(() => {
-    const list = instances ?? [];
-    if (!nameSearch.trim()) return list;
-    const q = nameSearch.toLowerCase();
+    let list = instances ?? [];
+    if (searchStatus !== "all") {
+      list = list.filter((i) => i.connectionStatus === searchStatus);
+    }
+    const q = nameSearch.trim().toLowerCase();
+    if (!q) return list;
     return list.filter((i) => i.name.toLowerCase().includes(q) || (i.profileName && i.profileName.toLowerCase().includes(q)));
-  }, [instances, nameSearch]);
+  }, [instances, nameSearch, searchStatus]);
+
+  const instanceStatuses = [
+    { value: "all", label: t("status.all") },
+    { value: "close", label: t("status.closed") },
+    { value: "connecting", label: t("status.connecting") },
+    { value: "open", label: t("status.open") },
+  ];
 
   const totalCount = filteredInstances.length;
   const confirmValid = deleteConfirmText === deleteTarget?.name;
@@ -92,7 +109,31 @@ function Dashboard() {
             onClick: resetTable,
           },
         ]}
-      />
+      >
+        <div className="flex items-center justify-end">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="secondary" size="sm">
+                {t("dashboard.status")}
+                <ChevronsUpDown className="ml-2 h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              {instanceStatuses.map((s) => (
+                <DropdownMenuCheckboxItem
+                  key={s.value}
+                  checked={searchStatus === s.value}
+                  onCheckedChange={(checked) => {
+                    if (checked) setSearchStatus(s.value);
+                  }}
+                >
+                  {s.label}
+                </DropdownMenuCheckboxItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      </BaseHeader>
 
       <div className="flex-1">
         {isLoading ? (
